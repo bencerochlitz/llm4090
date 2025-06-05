@@ -6,6 +6,7 @@ import sys
 import os
 import h5py
 import time
+import torch
 
 
 def load_and_convert_to_h5(path, dataset):
@@ -36,7 +37,7 @@ def load_and_convert_to_h5(path, dataset):
         ds[:] = data_test
 
 
-def load_h5(path):
+def load_string_data(path):
     with h5py.File(path, 'r') as h5:
         d_train = h5['train'][:]
         d_val = h5['val'][:]
@@ -107,6 +108,35 @@ def save_tokenized_data(path, data_train, data_val, data_test):
         ds[:] = data_test
 
 
+def append_to_tensor(t: torch.Tensor, np_data: np.ndarray, max_length):
+    for i, d in enumerate(np_data):
+        n = min(len(d), max_length)
+        t[i][: n] = torch.from_numpy(d[: n])
+
+        # if i == 1e6:
+        #     break
+
+
+def load_tokenized_data(path, max_length=512):
+    with h5py.File(path, 'r') as h5:
+        d_train = h5['train'][:]
+        d_val = h5['val'][:]
+        d_test = h5['test'][:]
+
+    n_tr = len(d_train)
+    n_va = len(d_val)
+    n_te = len(d_test)
+    tr = torch.zeros((n_tr, max_length), dtype=torch.uint16, pin_memory=True)
+    va = torch.zeros((n_va, max_length), dtype=torch.uint16, pin_memory=True)
+    te = torch.zeros((n_te, max_length), dtype=torch.uint16, pin_memory=True)
+
+    append_to_tensor(tr, d_train, max_length)
+    append_to_tensor(va, d_val, max_length)
+    append_to_tensor(te, d_test, max_length)
+
+    return tr, va, te
+
+
 if __name__ == "__main__":
 
     path = './data/wikitext.h5'
@@ -114,7 +144,7 @@ if __name__ == "__main__":
     # dataset = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1")
     # load_and_convert_to_h5(path, dataset)
 
-    d_train, d_val, d_test = load_h5(path)
+    d_train, d_val, d_test = load_string_data(path)
 
     t_s = time.perf_counter()
 
