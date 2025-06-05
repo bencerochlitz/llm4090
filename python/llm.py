@@ -3,8 +3,6 @@ from torch import nn
 
 from layers import *
 
-from datasets import load_dataset
-
 assert torch.cuda.is_available()
 device = torch.device('cuda:0')
 
