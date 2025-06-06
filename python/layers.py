@@ -3,7 +3,7 @@ import torch
 from torch import nn
 
 
-class GPT2Layer(nn.Module):
+class TransformerBlock(nn.Module):
     def __init__(self, C, num_heads, hidden_dim):
         super().__init__()
 
@@ -31,17 +31,22 @@ class GPT2Layer(nn.Module):
 
 class LLM(nn.Module):
 
-    def __init__(self, V, C, num_heads, num_layers, hidden_dim):
+    def __init__(self, V, T, C, num_heads, num_layers, hidden_dim):
         super().__init__()
+        
+        self.tok_embedding = nn.Embedding(V, C)
+        self.pos_embedding = nn.Embedding(T, C)
 
         self.transformer = nn.Sequential()
         for _ in range(num_layers):
-            self.transformer.append(GPT2Layer(C, num_heads, hidden_dim))
+            self.transformer.append(TransformerBlock(C, num_heads, hidden_dim))
 
         self.ln = nn.LayerNorm(C)
         self.dense = nn.Linear(C, V)
 
-    def forward(self, x):
+    def forward(self, x, ids):
+        x = self.tok_embedding(x) + self.pos_embedding(ids)
         x = self.transformer(x)
         x = self.ln(x)
         x = self.dense(x)
+        return x

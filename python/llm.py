@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import time
 
-from dataset_tokenizer import load_tokenized_data
+from dataset_tokenizer import load_packed_padded_data
 from layers import *
 
 assert torch.cuda.is_available()
@@ -15,15 +15,12 @@ if __name__ == "__main__":
     print("loading dataset...")
     t_s = time.perf_counter()
 
-    d_train, d_val, d_test = load_tokenized_data('./data/wikitext_tok.h5')
+    path_tokens_packed = './data/wikitext_tok_packed.h5'
+    d_train, d_val, d_test = load_packed_padded_data(path_tokens_packed)
 
     print("d_train.shape: ", d_train.shape)
     print("d_val.shape: ", d_val.shape)
     print("d_test.shape: ", d_test.shape)
-
-    print("d_train: ", d_train[:4])
-    print("d_val: ", d_val[:4])
-    print("d_test: ", d_test[:4])
 
     d_train = d_train.to(device)
     d_val = d_val.to(device)
@@ -33,7 +30,7 @@ if __name__ == "__main__":
 
     # llm params hardcoded for now
     V = 50257
-    B = 512  # seq_length 1024
+    T = 512  # seq_length 1024
     C = 384  # embed_dim 768
     num_heads = 6  # 12
     hidden_dim = 256
@@ -43,7 +40,7 @@ if __name__ == "__main__":
     print("building llm...")
     t_s = time.perf_counter()
 
-    net = LLM(V, C, num_heads, num_layers, hidden_dim).to(device)
+    net = LLM(V, T, C, num_heads, num_layers, hidden_dim).to(device)
     num_p = sum(p.numel() for p in net.parameters())
 
     print("building llm done, total params: {}M, took {}s".format(
