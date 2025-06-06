@@ -10,23 +10,13 @@ device = torch.device('cuda:0')
 
 
 if __name__ == "__main__":
-
     # load data
-    print("loading dataset...")
-    t_s = time.perf_counter()
-
     path_tokens_packed = './data/wikitext_tok_packed.h5'
-    d_train, d_val, d_test = load_packed_padded_data(path_tokens_packed)
-
-    print("d_train.shape: ", d_train.shape)
-    print("d_val.shape: ", d_val.shape)
-    print("d_test.shape: ", d_test.shape)
-
-    d_train = d_train.to(device)
-    d_val = d_val.to(device)
-    d_test = d_test.to(device)
-
-    print("done loading dataset, took ", time.perf_counter() - t_s)
+    tr, va, te, tr_ids, va_ids, te_ids = load_packed_padded_data(path_tokens_packed)
+    
+    tr = tr.to(device)
+    va = va.to(device)
+    te = te.to(device)
 
     # llm params hardcoded for now
     V = 50257

@@ -60,39 +60,18 @@ def load_string_data(path):
 
 
 def encode_dataset(data):
-
-    # Test encoding
     enc = tiktoken.get_encoding("gpt2")  # Load the GPT-2 tokenizer
 
     arr = []
     num_threads = 4  # seems to be the sweet spot
     num_s = len(data)
-    # num_batches = num_s // num_threads
     print("num_s: ", num_s)
     print("1e6 takes ~30s")
-    # print("num_batches: ", num_batches)
-
-    # for i in range(num_batches):
-    # print("encoding batch: ", i)
-    # idx_b = i * num_threads
-    # idx_e = (i + 1) * num_threads
 
     tokens = enc.encode_batch(data, num_threads=num_threads)
 
     for t in tokens:
         t.append(enc.EOT_TOKEN)  # Ａdd the end of text token
-
-    # tokens = np.asarray(tokens, dtype=np.uint16)
-    # arr.extend(tokens)
-
-    # if i < 3:
-    #     # print("tokens[0] type: ", type(tokens[0]))
-    #     # print("tokens[0] size: ", sys.getsizeof(tokens[0]))
-    #     print(s)
-    #     print(tokens)
-    #     print(enc.decode(tokens))
-
-    # print("tokenized data: ", arr)
 
     return tokens
 
@@ -112,19 +91,6 @@ def save_tokenized_data(path, data_train, data_val, data_test):
 
         ds = h5.create_dataset('test', shape=len(data_test), dtype=dt)
         ds[:] = data_test
-
-
-def pad_eot(tokens):
-    pad = MAX_LENGTH - len(tokens)
-
-    if pad <= -1:
-        return
-
-    if pad == 0:
-        tokens[-1] = EOT_TOKEN
-        return
-
-    return np.append(tokens, ([EOT_TOKEN] * pad))
 
 
 def sequence_packing(tensor: torch.Tensor, np_arr: np.ndarray):
@@ -158,17 +124,6 @@ def sequence_packing(tensor: torch.Tensor, np_arr: np.ndarray):
     return tensor[: i + 1]
 
 
-# def sequence_ids(tokens):
-#     i = 0
-#     for t in tokens:
-#         yield i
-        
-#         if t == EOT_TOKEN:
-#             i = 0
-#         else:
-#             i += 1
-
-
 def sequence_ids_gpu(tokens: torch.Tensor):
     B, T = tokens.shape
     
@@ -194,12 +149,6 @@ def save_packed_padded_data(path_tokens, path_tokens_packed):
         d_train = h5['train'][:]
         d_val = h5['val'][:]
         d_test = h5['test'][:]
-
-    # # this is much slower than overriding torch tensors
-    # d_train = list(map(pad_eot, d_train))
-    # d_val = list(map(pad_eot, d_val))
-    # d_test = list(map(pad_eot, d_test))
-    # print("d_train ", d_train[10])
 
     # this still takes 9s...
     n_tr = len(d_train)
@@ -254,6 +203,9 @@ def save_packed_padded_data(path_tokens, path_tokens_packed):
 
 
 def load_packed_padded_data(path):
+    print("loading dataset in uint16...")
+    t_s = time.perf_counter()
+    
     with h5py.File(path, 'r') as h5:
         tr = h5['train'][:]
         va = h5['val'][:]
@@ -268,6 +220,20 @@ def load_packed_padded_data(path):
     tr_ids = torch.from_numpy(tr_ids)
     va_ids = torch.from_numpy(va_ids)
     te_ids = torch.from_numpy(te_ids)
+    
+    print("tr.shape: ", tr.shape)
+    print("va.shape: ", va.shape)
+    print("te.shape: ", te.shape)
+    
+    assert(tr.shape == tr_ids.shape)
+    assert(va.shape == va_ids.shape)
+    assert(te.shape == te_ids.shape)
+    
+    dt = torch.uint16
+    assert(tr.dtype == dt and va.dtype == dt and va.dtype == dt)
+    assert(tr_ids.dtype == dt and va_ids.dtype == dt and te_ids.dtype == dt)
+
+    print("done loading dataset, took ", time.perf_counter() - t_s)
     
     return tr, va, te, tr_ids, va_ids, te_ids
 
