@@ -62,11 +62,9 @@ def load_string_data(path):
 def encode_dataset(data):
     enc = tiktoken.get_encoding("gpt2")  # Load the GPT-2 tokenizer
 
-    arr = []
     num_threads = 4  # seems to be the sweet spot
-    num_s = len(data)
-    print("num_s: ", num_s)
-    print("1e6 takes ~30s")
+    print("len(data): ", len(data))
+    print("0.5 GB of data takes ~60s")
 
     tokens = enc.encode_batch(data, num_threads=num_threads)
 
@@ -202,24 +200,24 @@ def save_packed_padded_data(path_tokens, path_tokens_packed):
         ds[:] = te_ids
 
 
-def load_packed_padded_data(path):
+def load_packed_padded_data(path, T, device='cpu'):
     print("loading dataset in uint16...")
     t_s = time.perf_counter()
     
     with h5py.File(path, 'r') as h5:
-        tr = h5['train'][:]
-        va = h5['val'][:]
-        te = h5['test'][:]
-        tr_ids = h5['train_ids'][:]
-        va_ids = h5['val_ids'][:]
-        te_ids = h5['test_ids'][:]
+        tr = h5['train'][:, :T]
+        va = h5['val'][:, :T]
+        te = h5['test'][:, :T]
+        tr_ids = h5['train_ids'][:, :T]
+        va_ids = h5['val_ids'][:, :T]
+        te_ids = h5['test_ids'][:, :T]
         
-    tr = torch.from_numpy(tr)
-    va = torch.from_numpy(va)
-    te = torch.from_numpy(te)
-    tr_ids = torch.from_numpy(tr_ids)
-    va_ids = torch.from_numpy(va_ids)
-    te_ids = torch.from_numpy(te_ids)
+    tr = torch.from_numpy(tr).to(device)
+    va = torch.from_numpy(va).to(device)
+    te = torch.from_numpy(te).to(device)
+    tr_ids = torch.from_numpy(tr_ids).to(device)
+    va_ids = torch.from_numpy(va_ids).to(device)
+    te_ids = torch.from_numpy(te_ids).to(device)
     
     print("tr.shape: ", tr.shape)
     print("va.shape: ", va.shape)

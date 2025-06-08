@@ -6,6 +6,8 @@ from torch import nn
 class TransformerBlock(nn.Module):
     def __init__(self, C, num_heads, hidden_dim):
         super().__init__()
+        
+        self.C = C
 
         self.ln_1 = nn.LayerNorm(C)
         self.dense_1 = nn.Linear(C, C * 3)
@@ -22,7 +24,13 @@ class TransformerBlock(nn.Module):
     def forward(self, x):
         y = self.ln_1(x)
         y = self.dense_1(y)
-        y = self.att(y)
+        
+        # split
+        q, k, v = y[..., :self.C], y[..., self.C:self.C*2], y[..., self.C*2:]
+        
+        # need an attention mask for packed sequence
+        y, _ = self.att(q, k, v, need_weights=False, is_causal=False)
+        
         x = self.dense_2(y) + x
         y = self.ln_2(x)
         y = self.ff(y) + x
@@ -43,10 +51,20 @@ class LLM(nn.Module):
 
         self.ln = nn.LayerNorm(C)
         self.dense = nn.Linear(C, V)
+        
+        # for inference
+        self.sm = nn.Softmax()
 
     def forward(self, x, ids):
         x = self.tok_embedding(x) + self.pos_embedding(ids)
         x = self.transformer(x)
         x = self.ln(x)
         x = self.dense(x)
+        return x
+    
+    @torch.jit.export
+    def infer(self, x, ids):
+        x = self(x, ids)
+        x = self.sm(x)
+        x = torch.multinomial(x, 1)
         return x
