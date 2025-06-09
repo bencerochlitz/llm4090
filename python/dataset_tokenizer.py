@@ -200,7 +200,7 @@ def save_packed_padded_data(path_tokens, path_tokens_packed):
         ds[:] = te_ids
 
 
-def load_packed_padded_data(path, T, device='cpu'):
+def load_packed_padded_data(path, T=512, device='cpu'):
     print("loading dataset in uint16...")
     t_s = time.perf_counter()
     
