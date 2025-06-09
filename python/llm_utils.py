@@ -35,7 +35,7 @@ def sample_batch(batch, batch_ids, data, data_ids, targets, batch_targets):
     batch_targets.copy_(targets[ids])
 
 # @torch.jit.script
-def att_mask_packed_seq(tokens, T: int, eot: int):
+def att_mask_packed_seq(tokens, eot: int):
     eot_mask = tokens == eot
     
     cumsum = torch.cumsum(eot_mask, -1)
@@ -45,6 +45,7 @@ def att_mask_packed_seq(tokens, T: int, eot: int):
     # print(eot_mask)
     # print(cumsum)
     
+    T = tokens.shape[-1]
     mask = cumsum.unsqueeze(-1).repeat(1, 1, T)
     
     # print(mask.shape)

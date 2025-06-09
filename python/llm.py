@@ -23,6 +23,7 @@ class LLM_training():
                  data_path, B, eot_token,
                  writer, writer_dir):
         
+        self.V = V
         self.T = T
         self.num_heads = num_heads
         self.eot_token = eot_token
@@ -109,6 +110,9 @@ class LLM_training():
         self.batch_ids = torch.zeros((B, T), dtype=torch.int, device=device, requires_grad=False)
         self.batch_targets = torch.zeros((B, T), dtype=torch.int, device=device, requires_grad=False)
         
+        # self.eot_tens = torch.full((B, T), eot_token, dtype=torch.int, device=device, requires_grad=False)
+        self.mask = torch.zeros((B, T), dtype=torch.bool, device=device, requires_grad=False)
+        
         
     def train_step(self):
         # graph safe method
@@ -121,7 +125,7 @@ class LLM_training():
         
         # compute attention mask for packed sequence
         with record_function("att_mask_packed_seq"):
-            att_mask = att_mask_packed_seq(self.batch, self.T, self.eot_token)
+            att_mask = att_mask_packed_seq(self.batch, self.eot_token)
             att_mask = torch.repeat_interleave(att_mask, self.num_heads, dim=0)  # [N * H, T, S]
         
         # forward
@@ -131,6 +135,12 @@ class LLM_training():
             # cross entropy loss only supports N, C input and C target shapes
             out_logits = torch.flatten(out_logits, start_dim=0, end_dim=-2)
             targets = torch.flatten(self.batch_targets).long()
+            
+            # mask the loss for input eot tokens
+            self.mask[:] = self.batch == self.eot_token
+            mask = torch.flatten(self.mask).unsqueeze(-1)
+            # set the logits vector to a uniform distribution
+            out_logits = torch.where(mask, 1, out_logits)
         
             # loss
             loss = self.loss_fn(out_logits, targets)
@@ -152,7 +162,7 @@ class LLM_training():
                      self.va_targets, self.batch_targets)
         
         # compute attention mask for packed sequence
-        att_mask = att_mask_packed_seq(self.batch, self.T, self.eot_token)
+        att_mask = att_mask_packed_seq(self.batch, self.eot_token)
         att_mask = torch.repeat_interleave(att_mask, self.num_heads, dim=0)  # [N * H, T, S]
         
         # forward
@@ -162,6 +172,12 @@ class LLM_training():
         out_logits = torch.flatten(out_logits, start_dim=0, end_dim=-2)
         targets = torch.flatten(self.batch_targets).long()
         
+        # mask the loss for input eot tokens
+        self.mask[:] = self.batch == self.eot_token
+        mask = torch.flatten(self.mask).unsqueeze(-1)
+        # set the logits vector to a uniform distribution
+        out_logits = torch.where(mask, 1, out_logits)
+    
         # loss
         loss = self.loss_fn(out_logits, targets)
         
@@ -274,8 +290,16 @@ class LLM_training():
         ids = ids.unsqueeze(0)
         
         # compute attention mask for packed sequence
-        att_mask = att_mask_packed_seq(x, self.T, self.eot_token)
+        att_mask = att_mask_packed_seq(x, self.eot_token)
         att_mask = torch.repeat_interleave(att_mask, self.num_heads, dim=0)
+        
+        # the attention mask should ignore the eot padding for inference
+        att_mask[:, l, :] = True
+        att_mask[:, :, l] = True
+        att_mask[:, l, l] = False
+        
+        # print(att_mask.shape)
+        # print(att_mask[0, :l*2, :l*2])
         
         return x, ids, att_mask
     
@@ -308,8 +332,8 @@ class LLM_training():
                 # print the predections
                 y_lst = y[:l+1].tolist()
                 y_str = self.enc.decode(y_lst)
-                print("next tokens: ", y_lst)
-                print("next decoded: ", y_str)
+                # print("all pred tokens: ", y_lst)
+                print("all pred decoded: ", y_str)
                 
                 # take the next predicted token
                 out.append(y_lst[-1])

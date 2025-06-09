@@ -62,7 +62,7 @@ if __name__ == "__main__":
         # test_seq = "The game began development in 2010 , carrying over a large portion of the work done on Valkyria Chronicles II . While it retained the standard features of the series"
         
         # num token to predict
-        num_tokens = 20
+        num_tokens = 5
         
         # infer
         model.infer(test_seq, num_tokens, ckpt=ckpt)
