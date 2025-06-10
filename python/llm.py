@@ -9,6 +9,8 @@ import time
 import os
 from torch.profiler import profile, record_function, ProfilerActivity
 
+from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
+
 from layers import *
 from llm_utils import *
 from dataset_tokenizer import load_packed_padded_data
@@ -19,7 +21,7 @@ device = torch.device('cuda:0')
 
 class LLM_training():
     
-    def __init__(self, V, T, C, num_heads, num_layers, hidden_dim,
+    def __init__(self, V, T, C, num_heads, num_layers,
                  data_path, B, eot_token,
                  writer, writer_dir):
         
@@ -35,7 +37,7 @@ class LLM_training():
         print("building llm...")
         t_s = time.perf_counter()
         
-        self.llm = torch.jit.script(LLM(V, T, C, num_heads, num_layers, hidden_dim)).to(device)
+        self.llm = torch.jit.script(LLM(V, T, C, num_heads, num_layers)).to(device)
 
         num_p = sum(p.numel() for p in self.llm.parameters())
         print("building llm done, total params: {}M, took {}s".format(
@@ -45,11 +47,11 @@ class LLM_training():
         self.loss_fn = torch.jit.script(nn.CrossEntropyLoss(reduction='mean'))
         
         # optimizer
-        # params according to Claude
+        # params are according to Claude
         self.optimizer = torch.optim.AdamW(self.llm.parameters(),
                                           lr = 3e-4,
                                           betas=(0.9, 0.99),
-                                        #   weight_decay=0.1,
+                                          weight_decay=0.1,
                                           capturable=True)
         
         # graph capture
@@ -112,7 +114,14 @@ class LLM_training():
         
         # self.eot_tens = torch.full((B, T), eot_token, dtype=torch.int, device=device, requires_grad=False)
         self.mask = torch.zeros((B, T), dtype=torch.bool, device=device, requires_grad=False)
-        
+    
+    def set_lr_scheduler(self, total_steps):
+        # Cosine annealing scheduler
+        self.cosine_scheduler = CosineAnnealingLR(
+            self.optimizer,
+            T_max=total_steps,
+            eta_min=3e-5  # Minimum LR (10% of your base 3e-4)
+        )
         
     def train_step(self):
         # graph safe method
@@ -196,7 +205,7 @@ class LLM_training():
         
         t_s = time.perf_counter()
         
-        if should_profile and self.epoch == 1:
+        if should_profile and self.epoch == 0:
             with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 schedule=torch.profiler.schedule(
                     wait=2,
@@ -209,7 +218,9 @@ class LLM_training():
             ) as p:
                 for n in range(num_grad_steps):
                     self.g.replay()
-                    p.step()
+                    p.step()  
+        elif should_profile:
+            return
         
         for n in range(num_grad_steps):
             if n % 10 == 0:
@@ -224,12 +235,18 @@ class LLM_training():
             else:
                 self.g.replay()
                 
+            # step
             self.step += 1
+                
+            # learning rate scheduler
+            self.cosine_scheduler.step()
+            lr = self.cosine_scheduler.get_last_lr()[0]
             
             # stats
             loss_avg = self.loss_sum.item() / (n+1)
             self.writer.add_scalar('loss/avg', self.loss_sum.item() / (n+1), self.step)
             self.writer.add_scalar('loss/curr', self.loss_curr.item(), self.step)
+            self.writer.add_scalar('lr', lr, self.step)
             
             if (n + 1) % 10 == 0:
                 print("step: {}, loss: {}, avg step time: {}s".format(
@@ -264,7 +281,8 @@ class LLM_training():
         if should_profile:
             self.train_epoch(num_grad_steps, should_profile=True)
             return
-            
+        
+        t_total = 0.0
         for _ in range(num_epochs):
             
             print("starting epoch {}...".format(self.epoch))
@@ -272,7 +290,9 @@ class LLM_training():
             
             self.train_epoch(num_grad_steps, should_profile=False)
             
-            print("epoch {} done, took {}s".format(self.epoch, time.perf_counter() - t_s))
+            t_i = time.perf_counter() - t_s
+            t_total += t_i
+            print("epoch {} done, took {}s, total time: {}".format(self.epoch, t_i, t_total))
             
             self.epoch += 1
             
@@ -330,7 +350,7 @@ class LLM_training():
                 y = self.llm.infer(x, ids, att_mask)
                 
                 # print the predections
-                y_lst = y[:l+1].tolist()
+                y_lst = y[:l].tolist()
                 y_str = self.enc.decode(y_lst)
                 # print("all pred tokens: ", y_lst)
                 print("all pred decoded: ", y_str)
@@ -340,6 +360,7 @@ class LLM_training():
 
             # print the final predections
             out_str = self.enc.decode(out)
+            print("\n########## NEXT TOKEN PREDECTIONS ##########")
             print("next tokens: ", out)
             print("next decoded: ", out_str)
             

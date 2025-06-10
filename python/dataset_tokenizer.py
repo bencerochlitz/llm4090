@@ -244,14 +244,19 @@ parser.add_argument("--pack", type=bool, default=False, help="perform sequence p
 if __name__ == "__main__":
     
     args = parser.parse_args()
-
+    
     path = './data/wikitext.h5'
     path_tokens = './data/wikitext_tok.h5'
     path_tokens_packed = './data/wikitext_tok_packed.h5'
     
+    # path = './openwebtext.h5'
+    # path_tokens = './data/openwebtext_tok.h5'
+    # path_tokens_packed = './data/openwebtext_tok_packed.h5'
+    
     if args.save_str:
         # dataset = load_dataset("Salesforce/wikitext", "wikitext-103-v1")
         dataset = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1")
+        # dataset = load_dataset("Skylion007/openwebtext")
         save_string_data(path, dataset)
     
     if args.tokenize:

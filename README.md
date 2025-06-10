@@ -20,7 +20,7 @@ training and validation loss:
 
 # inference example from the test set
 - input: ..."How to Curse was performed at Bush Theatre in the"
-- next 20 tokens: " Israel theatre , where it was staged through a fill of the theatre . The film satirizes Bullen"
+- next 20 tokens: "  North of England on Valentine 's Day . In 2001 , he noted the controversial portrayal of the role"
 - word context and grammar seem to be close to OK
 
 # TODO:

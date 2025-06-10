@@ -4,24 +4,23 @@ from torch import nn
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
+import math
 
 class TransformerBlock(nn.Module):
-    def __init__(self, C, num_heads, hidden_dim):
+    def __init__(self, C, num_heads):
         super().__init__()
         
         self.C = C
 
         self.ln_1 = nn.LayerNorm(C)
         self.dense_1 = nn.Linear(C, C * 3)
-        self.att = nn.MultiheadAttention(C, num_heads, batch_first=True)
+        self.att = nn.MultiheadAttention(C, num_heads, dropout=0.1, batch_first=True)
         self.dense_2 = nn.Linear(C, C)
         self.ln_2 = nn.LayerNorm(C)
         # feedforward layer
-        self.ff = nn.Sequential(
-            nn.Linear(C, C * 4),
-            nn.GELU(),
-            nn.Linear(C * 4, C)
-        )
+        self.ff_dense_1 = nn.Linear(C, C * 4)
+        self.gelu = nn.GELU()
+        self.ff_dense_2 = nn.Linear(C * 4, C)
 
     def forward(self, x, att_mask):
         y = self.ln_1(x)
@@ -33,14 +32,20 @@ class TransformerBlock(nn.Module):
         # attention mask for packed sequence
         y, _ = self.att(q, k, v, attn_mask=att_mask, need_weights=False, is_causal=False)
         
+        # projection
         x = self.dense_2(y) + x
         y = self.ln_2(x)
-        y = self.ff(y) + x
+        
+        # feedforward
+        y = self.ff_dense_1(y)
+        y = self.gelu(y)
+        y = self.ff_dense_2(y) + x
+        
         return y
 
 
 class LLM(nn.Module):
-    def __init__(self, V, T, C, num_heads, num_layers, hidden_dim):
+    def __init__(self, V, T, C, num_heads, num_layers):
         super().__init__()
         
         self.tok_embedding = nn.Embedding(V, C)
@@ -48,13 +53,37 @@ class LLM(nn.Module):
 
         self.transformers = nn.ModuleList()
         for _ in range(num_layers):
-            self.transformers.append(TransformerBlock(C, num_heads, hidden_dim))
+            self.transformers.append(TransformerBlock(C, num_heads))
 
         self.ln = nn.LayerNorm(C)
         self.dense = nn.Linear(C, V)
         
         # for inference
         self.sm = nn.Softmax(dim=-1)
+        
+        with torch.no_grad():
+            # weight init suggestions are from Claude
+            for layer in self.children():
+                if isinstance(layer, nn.Linear):
+                    nn.init.normal_(layer.weight, mean=0.0, std=0.02)
+                    nn.init.zeros_(layer.bias)
+                    
+                # these are default anyway
+                if isinstance(layer, nn.LayerNorm):
+                    nn.init.ones_(layer.weight)
+                    nn.init.zeros_(layer.bias)
+                    
+            # dense projection + feedforward projection layer scaling
+            scaling = 1.0 / math.sqrt(num_layers)
+            for tr_block in self.transformers:
+                tr_block.dense_2.weight[:] *= scaling
+                tr_block.ff_dense_2.weight[:] *= scaling
+
+            # token embedding
+            nn.init.normal_(self.tok_embedding.weight, mean=0.0, std=0.02)
+            
+            # position embedding
+            nn.init.normal_(self.pos_embedding.weight, mean=0.0, std=0.01)
 
     def forward(self, x, ids, att_mask):
         x = self.tok_embedding(x) + self.pos_embedding(ids)
