@@ -1,6 +1,9 @@
 # llm4090
 Prototype LLM based on the GPT2 architecture that can be trained on a laptop 4090. Written in pytorch.
 
+- run training: cd python && python runner.py --mode=train
+- run inference: cd python && python runner.py --mode=infer
+
 # features
 - optimizations: CUDA graph replay + jit compilation
 - dataset for prototyping: wikitext-103-raw-v1 (0.5 GB) - https://huggingface.co/datasets/Salesforce/wikitext
