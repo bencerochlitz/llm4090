@@ -15,8 +15,8 @@ Prototype LLM based on the GPT2 architecture that can be trained on a laptop 409
 training and validation loss:
 - 1000 epochs, 100 steps/epoch, batch size = 64, cosine learning rate annealing
 
-![image](https://github.com/user-attachments/assets/3a9fdf3b-44b2-4438-9c68-09007a4a054c)
-![image](https://github.com/user-attachments/assets/74da70f6-cc67-4960-89ac-26a1f2d5269c)
+<img src="https://github.com/user-attachments/assets/3a9fdf3b-44b2-4438-9c68-09007a4a054c" width="500" height="300">
+<img src="https://github.com/user-attachments/assets/74da70f6-cc67-4960-89ac-26a1f2d5269c" width="500" height="300">
 
 # inference example from the test set
 - input: ..."How to Curse was performed at Bush Theatre in the"
