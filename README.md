@@ -15,7 +15,7 @@ training and validation loss:
 ![image](https://github.com/user-attachments/assets/3a9fdf3b-44b2-4438-9c68-09007a4a054c)
 ![image](https://github.com/user-attachments/assets/74da70f6-cc67-4960-89ac-26a1f2d5269c)
 
-# inference example from the test set:
+# inference example from the test set
 - input: ..."How to Curse was performed at Bush Theatre in the"
 - next 20 tokens: " Israel theatre , where it was staged through a fill of the theatre . The film satirizes Bullen"
 - word context and grammar seem to be close to OK
