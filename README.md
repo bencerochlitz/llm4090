@@ -1,6 +1,7 @@
 # llm4090
 Prototype LLM based on the GPT2 architecture that can be trained on a laptop 4090. Written in pytorch.
 
+- dataset ready for training and inference checkpoint are available in the repo
 - run training: cd python && python runner.py --mode=train
 - run inference: cd python && python runner.py --mode=infer
 
