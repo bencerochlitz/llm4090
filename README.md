@@ -25,6 +25,7 @@ training and validation loss:
 - word context and grammar seem to be close to OK
 
 # TODO:
+- Use FP16
 - Gradient accumulation: batch size 64 -> 256
 - Larger dataset to reach the 40 token/model param target
 - Verification using deterministic sequences
