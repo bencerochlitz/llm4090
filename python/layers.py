@@ -96,7 +96,6 @@ class LLM(nn.Module):
         x = self.dense(x)
         return x
     
-    @torch.jit.export
     def infer(self, x, ids, att_mask):
         x = self(x, ids, att_mask)
         x = self.sm(x)

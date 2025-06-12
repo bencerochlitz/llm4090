@@ -2,7 +2,7 @@ import torch
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
-@torch.jit.script
+@torch.compile
 def compute_targets(data, target_buf, eot_token: int):
     # roll left
     # RuntimeError: "roll_cuda" not implemented for 'UInt16'
@@ -17,7 +17,7 @@ def compute_targets(data, target_buf, eot_token: int):
     # copy result
     target_buf.copy_(targets)
 
-@torch.jit.script
+@torch.compile
 def sample_batch(batch, batch_ids, data, data_ids, targets, batch_targets):
     device = batch.device
     N = len(data)
@@ -34,8 +34,8 @@ def sample_batch(batch, batch_ids, data, data_ids, targets, batch_targets):
     # token targets
     batch_targets.copy_(targets[ids])
 
-# @torch.jit.script
-def att_mask_packed_seq(tokens, eot: int):
+@torch.compile
+def att_mask_packed_seq(tokens, eot: int, num_heads: int):
     eot_mask = tokens == eot
     
     cumsum = torch.cumsum(eot_mask, -1)
@@ -46,19 +46,37 @@ def att_mask_packed_seq(tokens, eot: int):
     # print(cumsum)
     
     T = tokens.shape[-1]
-    mask = cumsum.unsqueeze(-1).repeat(1, 1, T)
-    
+    mask = cumsum.unsqueeze(-1).repeat(1, 1, T)    
     # print(mask.shape)
     
-    # NOTE: cuda graph capture doesn't like this line if jitted
     mask = mask == torch.transpose(mask, dim0=-2, dim1=-1)
     
     mask = torch.tril(mask, diagonal=0)
     
     # torch multihead attention: does not attend if True
-    return ~mask
+    mask = ~mask
     
-    # # return torch.ones((8, T, T), device=tokens.device)
+    mask = torch.repeat_interleave(mask, num_heads, dim=0) # [N * H, T, S]
+    return mask
+
+@torch.compile
+def compute_loss(logits, batch, batch_targets, eot_token, loss_fn):
+    # cross entropy loss only supports N, C input and C target shapes
+    logits = torch.flatten(logits, start_dim=0, end_dim=-2)
+    targets = torch.flatten(batch_targets).long()
+    
+    # mask the loss for input eot tokens
+    mask = batch == eot_token
+    mask = torch.flatten(mask).unsqueeze(-1)
+    # set the logits vector to a uniform distribution
+    logits = torch.where(mask, 1, logits)
+
+    # loss
+    loss = loss_fn(logits, targets)
+    
+    return loss
+
+
 
 assert torch.cuda.is_available()
 device = torch.device('cuda:0')
@@ -72,7 +90,8 @@ if __name__ == '__main__':
                            [0, 1, eot, 2, 3, 4, 5, eot]],
                           dtype=torch.int, device=device)
     
-    mask = att_mask_packed_seq(tokens, eot)
+    num_heads = 2
+    mask = att_mask_packed_seq(tokens, eot, num_heads)
     
     print(mask)
     

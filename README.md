@@ -6,7 +6,7 @@ Prototype LLM based on the GPT2 architecture that can be trained on a laptop 409
 - run inference: cd python && python runner.py --mode=infer
 
 # features
-- optimizations: CUDA graph replay + jit compilation
+- optimizations: CUDA graph replay + torch.compile
 - dataset for prototyping: wikitext-103-raw-v1 (0.5 GB) - https://huggingface.co/datasets/Salesforce/wikitext
 - sequence packing + custom attention mask
 - 6 transformer layers/blocks with 6 attention heads - https://medium.com/@hsinhungw/gpt-2-detailed-model-architecture-6b1aad33d16b
