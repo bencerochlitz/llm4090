@@ -36,8 +36,8 @@ if __name__ == "__main__":
     
     eot_token = V - 1
     # perf scales linearly until 64, for 128 VRAM is full
-    # TODO: gradient accummulation
-    B = 64
+    B = 8
+    num_batches = 1
     
     # boilerplate
     dir = "runs/LLM_{}".format(mode)
@@ -47,13 +47,13 @@ if __name__ == "__main__":
 
     # llm trainer
     model = LLM_training(V, T, C, num_heads, num_layers,
-                           path_tokens_packed, B, eot_token,
-                           writer, dir)
+                           path_tokens_packed, B, num_batches,
+                           eot_token, writer, dir)
     
     # train
     if mode == 'train':
         # NOTE: learning rate scheduler is hardcoded for now
-        num_epochs = 1000
+        num_epochs = 500
         num_grad_steps = 100
         model.set_lr_scheduler(num_epochs * num_grad_steps)
         model.train(num_epochs, num_grad_steps, profile)

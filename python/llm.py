@@ -9,7 +9,7 @@ import time
 import os
 from torch.profiler import profile, record_function, ProfilerActivity
 
-from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from layers import *
 from llm_utils import *
@@ -22,12 +22,13 @@ device = torch.device('cuda:0')
 class LLM_training():
     
     def __init__(self, V, T, C, num_heads, num_layers,
-                 data_path, B, eot_token,
+                 data_path, B, num_batches, eot_token,
                  writer, writer_dir):
         
         self.V = V
         self.T = T
         self.num_heads = num_heads
+        self.num_batches = num_batches
         self.eot_token = eot_token
         
         # encoder
@@ -37,7 +38,7 @@ class LLM_training():
         print("building llm...")
         t_s = time.perf_counter()
         
-        self.llm = LLM(V, T, C, num_heads, num_layers).to(device)
+        self.llm = LLM(V, T, C, num_heads, num_layers).to(torch.bfloat16).to(device)
         self.llm.compile()
 
         num_p = sum(p.numel() for p in self.llm.parameters())
@@ -113,9 +114,6 @@ class LLM_training():
         self.batch_ids = torch.zeros((B, T), dtype=torch.int, device=device, requires_grad=False)
         self.batch_targets = torch.zeros((B, T), dtype=torch.int, device=device, requires_grad=False)
         
-        # self.eot_tens = torch.full((B, T), eot_token, dtype=torch.int, device=device, requires_grad=False)
-        self.mask = torch.zeros((B, T), dtype=torch.bool, device=device, requires_grad=False)
-    
     def set_lr_scheduler(self, total_steps):
         # Cosine annealing scheduler
         self.cosine_scheduler = CosineAnnealingLR(
@@ -126,31 +124,47 @@ class LLM_training():
         
     def train_step(self):
         # graph safe method
+        self.optimizer.zero_grad(set_to_none=True)
+        self.loss_curr[:] = 0.0
         
-        # sample
-        with record_function("sample_batch"):
-            sample_batch(self.batch, self.batch_ids,
-                        self.tr, self.tr_ids,
-                        self.tr_targets, self.batch_targets)
-        
-        # compute attention mask for packed sequence
-        with record_function("att_mask_packed_seq"):
-            att_mask = att_mask_packed_seq(self.batch, self.eot_token, self.num_heads)
-        
-        # forward
-        with record_function("forward"):
-            logits = self.llm(self.batch, self.batch_ids, att_mask)
-            loss = compute_loss(logits, self.batch, self.batch_targets,
-                                self.eot_token, self.loss_fn)
+        # run N batches sequentially
+        for _ in range(self.num_batches):
+            # sample
+            with torch.no_grad():
+                with record_function("sample_batch"):
+                    sample_batch(self.batch, self.batch_ids,
+                                self.tr, self.tr_ids,
+                                self.tr_targets, self.batch_targets)
+                
+                # compute attention mask for packed sequence
+                with record_function("att_mask_packed_seq"):
+                    att_mask = att_mask_packed_seq(self.batch, self.eot_token, self.num_heads)
+            
+            # forward pass
+            with torch.autocast(device_type=str(device), dtype=torch.bfloat16):
+                with record_function("forward"):
+                
+                    logits = self.llm(self.batch, self.batch_ids, att_mask)
+                
+                with record_function("compute_loss"):
+                    
+                    # scales the loss by num_batches
+                    loss = compute_loss(logits, self.batch, self.batch_targets,
+                                            self.eot_token, self.loss_fn,
+                                            self.num_batches)
+                    
+            # accumulate gradients
+            with record_function("backward"):
+                loss.backward()
+            
+            # stats
+            self.loss_curr[:] += loss.detach()
         
         # optimizer
         with record_function("optimizer"):
-            self.optimizer.zero_grad(set_to_none=True)
-            loss.backward()
             self.optimizer.step()
         
-        # add loss
-        self.loss_curr[:] = loss.detach()
+        # stats
         self.loss_sum[:] += self.loss_curr
     
     def eval(self):
@@ -164,8 +178,10 @@ class LLM_training():
         
         # forward
         logits = self.llm(self.batch, self.batch_ids, att_mask)
+        
+        # scales the loss by num_batches
         loss = compute_loss(logits, self.batch, self.batch_targets,
-                            self.eot_token, self.loss_fn)
+                                self.eot_token, self.loss_fn, 1)
         
         # record
         self.loss_curr[:] = loss.detach()
@@ -248,9 +264,14 @@ class LLM_training():
         # save best
         if loss_val < self.loss_val_best:
             self.loss_val_best = loss_val
-            torch.save(self.llm.state_dict(), os.path.join(self.writer_dir, f'best.ckpt'))
+            torch.save(self.llm.state_dict(), os.path.join(self.writer_dir, 'best.ckpt'))
             print("saved ckpt with validation loss: ", loss_val)
-        
+            
+        # save after every 10 epochs to allow reload
+        if (self.epoch + 1) % 10 == 0:
+            torch.save(self.llm.state_dict(), os.path.join(self.writer_dir, f'epoch_{self.epoch + 1}.ckpt'))
+            print("saved ckpt with validation loss: ", loss_val)
+                   
         # stats
         self.writer.add_scalar('loss/validation', loss_val, self.epoch)
     

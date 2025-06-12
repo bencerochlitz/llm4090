@@ -60,7 +60,7 @@ def att_mask_packed_seq(tokens, eot: int, num_heads: int):
     return mask
 
 @torch.compile
-def compute_loss(logits, batch, batch_targets, eot_token, loss_fn):
+def compute_loss(logits, batch, batch_targets, eot_token, loss_fn, num_batches):
     # cross entropy loss only supports N, C input and C target shapes
     logits = torch.flatten(logits, start_dim=0, end_dim=-2)
     targets = torch.flatten(batch_targets).long()
@@ -74,7 +74,8 @@ def compute_loss(logits, batch, batch_targets, eot_token, loss_fn):
     # loss
     loss = loss_fn(logits, targets)
     
-    return loss
+    # scale loss
+    return loss / num_batches
 
 
 

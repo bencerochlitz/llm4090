@@ -10,11 +10,12 @@ Prototype LLM based on the GPT2 architecture that can be trained on a laptop 409
 - dataset for prototyping: wikitext-103-raw-v1 (0.5 GB) - https://huggingface.co/datasets/Salesforce/wikitext
 - sequence packing + custom attention mask
 - 6 transformer layers/blocks with 6 attention heads - https://medium.com/@hsinhungw/gpt-2-detailed-model-architecture-6b1aad33d16b
-- ~50M parameters
+- ~50M parameters (bf16)
+- batch size = 2 * 128 with gradient accumulation
 
 # results
 training and validation loss:
-- 1000 epochs, 100 steps/epoch, batch size = 64, cosine learning rate annealing
+- 50k steps, cosine learning rate annealing
 
 <img src="https://github.com/user-attachments/assets/3a9fdf3b-44b2-4438-9c68-09007a4a054c" width="400" height="250">
 <img src="https://github.com/user-attachments/assets/74da70f6-cc67-4960-89ac-26a1f2d5269c" width="400" height="250">
@@ -25,8 +26,7 @@ training and validation loss:
 - word context and grammar seem to be close to OK
 
 # TODO:
-- Use FP16
-- Gradient accumulation: batch size 64 -> 256
 - Larger dataset to reach the 40 token/model param target
+- Rotary embeddings
 - Verification using deterministic sequences
 - Investigation of predicted token distributions
