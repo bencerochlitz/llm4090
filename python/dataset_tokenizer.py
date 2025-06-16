@@ -44,19 +44,15 @@ def save_string_data(path, dataset):
         ds = h5.create_dataset('test', shape=len(data_test),
                                dtype=h5py.string_dtype())
         ds[:] = data_test
+        
 
-
-def load_string_data(path):
+def load_string_data(path, field):
     with h5py.File(path, 'r') as h5:
-        d_train = h5['train'][:]
-        d_val = h5['val'][:]
-        d_test = h5['test'][:]
+        d = h5[field][:]
 
-    d_train = [s.decode('utf-8') for s in d_train]
-    d_val = [s.decode('utf-8') for s in d_val]
-    d_test = [s.decode('utf-8') for s in d_test]
+    d = [s.decode('utf-8') for s in d]
 
-    return d_train, d_val, d_test
+    return d
 
 
 def encode_dataset(data):
@@ -245,22 +241,21 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    path = './data/wikitext.h5'
-    path_tokens = './data/wikitext_tok.h5'
-    path_tokens_packed = './data/wikitext_tok_packed.h5'
+    path = './data/dataset.h5'
+    path_tokens = './data/dataset_tok.h5'
+    path_tokens_packed = './data/dataset_tok_packed.h5'
     
-    # path = './openwebtext.h5'
-    # path_tokens = './data/openwebtext_tok.h5'
-    # path_tokens_packed = './data/openwebtext_tok_packed.h5'
+    dataset_names = ['wikitext', 'openwebtext']
+    ds_name = 'openwebtext'
     
     if args.save_str:
-        # dataset = load_dataset("Salesforce/wikitext", "wikitext-103-v1")
         dataset = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1")
-        # dataset = load_dataset("Skylion007/openwebtext")
         save_string_data(path, dataset)
     
     if args.tokenize:
-        d_train, d_val, d_test = load_string_data(path)
+        d_train = load_string_data(path, 'train')
+        d_val = load_string_data(path, 'val')
+        d_test = load_string_data(path, 'test')
 
         t_s = time.perf_counter()
 

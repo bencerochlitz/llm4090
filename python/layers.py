@@ -7,7 +7,7 @@ torch.backends.cudnn.allow_tf32 = True
 import math
 
 class TransformerBlock(nn.Module):
-    def __init__(self, C, num_heads):
+    def __init__(self, C, T, num_heads):
         super().__init__()
         
         self.C = C
@@ -21,8 +21,11 @@ class TransformerBlock(nn.Module):
         self.ff_dense_1 = nn.Linear(C, C * 4)
         self.gelu = nn.GELU()
         self.ff_dense_2 = nn.Linear(C * 4, C)
+        
+        self.att_mask = torch.tril(torch.ones((T, T)), diagonal=0)
+        self.att_mask.requires_grad = False
 
-    def forward(self, x, att_mask):
+    def forward(self, x):
         y = self.ln_1(x)
         y = self.dense_1(y)
         
@@ -30,7 +33,7 @@ class TransformerBlock(nn.Module):
         q, k, v = y[..., :self.C], y[..., self.C:self.C*2], y[..., self.C*2:]
         
         # attention mask for packed sequence
-        y, _ = self.att(q, k, v, attn_mask=att_mask, need_weights=False, is_causal=False)
+        y, _ = self.att(q, k, v, attn_mask=self.att_mask, need_weights=False, is_causal=True)
         
         # projection
         x = self.dense_2(y) + x
@@ -53,8 +56,13 @@ class LLM(nn.Module):
 
         self.transformers = nn.ModuleList()
         for _ in range(num_layers):
-            self.transformers.append(TransformerBlock(C, num_heads))
+            self.transformers.append(TransformerBlock(C, T, num_heads))
 
+        # # adding dense_1 down projection and // 12 gives a 33% perf boost
+        # self.dense_1 = nn.Linear(C, C // 12)
+        # self.ln = nn.LayerNorm(C // 12)
+        # self.dense_2 = nn.Linear(C // 12, V)
+        
         self.ln = nn.LayerNorm(C)
         self.dense = nn.Linear(C, V)
         
@@ -85,19 +93,24 @@ class LLM(nn.Module):
             # position embedding
             nn.init.normal_(self.pos_embedding.weight, mean=0.0, std=0.01)
 
-    def forward(self, x, ids, att_mask):
+    def forward(self, x, ids):
         x = self.tok_embedding(x) + self.pos_embedding(ids)
         
         for transformer in self.transformers:
             # print("transformer in: ", x.shape)
-            x = transformer(x, att_mask)
+            x = transformer(x)
             
+        # x = self.dense_1(x)
+        # x = self.ln(x)
+        # x = self.dense_2(x)
+        
         x = self.ln(x)
         x = self.dense(x)
+        
         return x
     
-    def infer(self, x, ids, att_mask):
-        x = self(x, ids, att_mask)
+    def infer(self, x, ids):
+        x = self(x, ids)
         x = self.sm(x)
         # print(x.shape)
         # remove batch dim

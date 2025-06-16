@@ -24,20 +24,17 @@ if __name__ == "__main__":
     profile = args.profile
     
     # load data
-    path_tokens_packed = './data/wikitext_tok_packed.h5'
+    path_tokens_packed = './data/dataset_tok_packed.h5'
 
     # llm params
-    V = 50257
     # the wikitext sequnces are pretty short anyway, so saving compute here
-    T = 512 //4  # seq_length 1024
+    T = 512  # seq_length 1024
     C = 768 //2  # embed_dim 768
     num_heads = 6  # 12
     num_layers = 6  # 12
     
-    eot_token = V - 1
-    # perf scales linearly until 64, for 128 VRAM is full
     B = 8
-    num_batches = 1
+    num_batches = 16
     
     # boilerplate
     dir = "runs/LLM_{}".format(mode)
@@ -46,9 +43,8 @@ if __name__ == "__main__":
     writer = SummaryWriter(dir)
 
     # llm trainer
-    model = LLM_training(V, T, C, num_heads, num_layers,
-                           path_tokens_packed, B, num_batches,
-                           eot_token, writer, dir)
+    model = LLM_training(T, C, num_heads, num_layers,
+                         B, num_batches, writer, dir)
     
     # train
     if mode == 'train':
@@ -59,29 +55,28 @@ if __name__ == "__main__":
         model.train(num_epochs, num_grad_steps, profile)
     
     if mode == 'infer':
-        ckpt = "runs/LLM_train_best/best.ckpt"
+        ckpt = "runs/LLM_train/best.ckpt"
         
-        # test seq
-        # this was in training
-        # test_seq = "The game began development in 2010 , carrying over a large portion of the work done"
-        # test_seq = "The game began development in 2010 , carrying over a large portion of the work done on Valkyria Chronicles II . "\
-            # "While it retained the standard features of the series"
+        # test seq - not in training or val set
+        test = model.loader.load_ready_data(0.1, begin=False)
+        test0 = test[-1][0:128]
         
-        # from the test set
-        test_seq = "In 2006 , Boulter starred alongside Whishaw in the play Citizenship written by Mark Ravenhill . "\
-            "He appeared on a 2006 episode of the television series , Doctors , followed by a role in the 2007 theatre production of How to Curse directed by Josie Rourke . "\
-            "How to Curse was performed at Bush Theatre in the"
-        # what follows:
-        # "London Borough of Hammersmith and Fulham . "
-        # "Boulter starred in two films in 2008 , Daylight Robbery by filmmaker Paris Leonti , and Donkey Punch directed by Olly Blackburn . "\
-        # "In May 2008 , Boulter made a guest appearance on a two @-@ part episode arc of the television series Waking the Dead , "\
-        # "followed by an appearance on the television series Survivors in November 2008 . "\
-        # "He had a recurring role in ten episodes of the television series Casualty in 2010 , as " Kieron Fletcher " . "\
-        # "Boulter starred in the 2011 film Mercenaries directed by Paris Leonti ."\
+        # TEXT:
+        #  Western ways to help LGBT people in the Middle East establish and
+        #  promote their rights. Firas is able to live more freely here in
+        #  New York City and was excited to tell me about an upcoming birthday
+        #  weekend he had planned for his boyfriend. However, he struggles
+        #  with having to conceal his identity among colleagues, given his position.
+        #  Firas explains,”The reason for secrecy is because in the Arabian peninsula
+        #  and specially in the Gulf, tribalism plays a huge part in diplomatic relations;
+        #  my security can be at risk when I go back home. Coming out to my immediate
+        #  family and close friends was easy, but taking my journey to the next level could not
+        
+        print(model.enc.decode(test0.tolist()))
         
         # num token to predict
-        num_tokens = 20
+        num_tokens = 50
         
         # infer
-        model.infer(test_seq, num_tokens, ckpt=ckpt)
+        model.infer(test0, num_tokens, ckpt=ckpt)
 

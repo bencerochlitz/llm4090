@@ -14,6 +14,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from layers import *
 from llm_utils import *
 from dataset_tokenizer import load_packed_padded_data
+from dataset_tokenizer_v2 import DataLoader
 
 assert torch.cuda.is_available()
 device = torch.device('cuda:0')
@@ -21,24 +22,23 @@ device = torch.device('cuda:0')
 
 class LLM_training():
     
-    def __init__(self, V, T, C, num_heads, num_layers,
-                 data_path, B, num_batches, eot_token,
-                 writer, writer_dir):
+    def __init__(self, T, C, num_heads, num_layers,
+                 B, num_batches, writer, writer_dir):
         
-        self.V = V
+        self.loader = DataLoader()
+        
+        self.V = self.loader.V
+        self.eot_token = self.loader.eot_token
+        
         self.T = T
         self.num_heads = num_heads
         self.num_batches = num_batches
-        self.eot_token = eot_token
-        
-        # encoder
-        self.enc = tiktoken.get_encoding("gpt2")
         
         # LLM
         print("building llm...")
         t_s = time.perf_counter()
         
-        self.llm = LLM(V, T, C, num_heads, num_layers).to(torch.bfloat16).to(device)
+        self.llm = LLM(self.V, T, C, num_heads, num_layers).to(torch.bfloat16).to(device)
         self.llm.compile()
 
         num_p = sum(p.numel() for p in self.llm.parameters())
@@ -71,48 +71,30 @@ class LLM_training():
         self.loss_val_best = 1.0e6
         
         # data
-        self.tr, self.va, self.te, \
-        self.tr_ids, self.va_ids, self.te_ids = load_packed_padded_data(data_path, T, device=device)
+        self.loader = DataLoader()
+        n_GBs = 8
+        data = self.loader.load_ready_data(n_GBs)
         
-        self.tr_size = len(self.tr)
-        self.va_size = len(self.va)
-        self.te_size = len(self.te)
-    
-        print("num training tokens: {}M".format(self.tr.numel() / 1e6))
+        n_train = int(len(data) * 0.8)
+        n_val = len(data) - n_train
         
-        # I wanted to use uint16 to store data but nothing is implemented for uint16 in pytorch
-        dt = torch.int
-        
-        self.tr, self.va, self.te = \
-            self.tr.to(dt), self.va.to(dt), self.te.to(dt)
-
-        self.tr_ids, self.va_ids, self.te_ids = \
-            self.tr_ids.to(dt), self.va_ids.to(dt), self.te_ids.to(dt)
-            
+        self.tr = data[: n_train].to(device)
+        self.val = data[n_train: ].to(device)
         self.tr.requires_grad = False
-        self.va.requires_grad = False
-        self.te.requires_grad = False
-        self.tr_ids.requires_grad = False
-        self.va_ids.requires_grad = False
-        self.te_ids.requires_grad = False
-        
-        # token targets
-        self.tr_targets = torch.zeros_like(self.tr, requires_grad=False)
-        self.va_targets = torch.zeros_like(self.va, requires_grad=False)
-        self.te_targets = torch.zeros_like(self.te, requires_grad=False)
-        
-        # compute targets to avoid computing on the fly
-        print("compute_targets...")
-        t_s = time.perf_counter()
-        compute_targets(self.tr, self.tr_targets, eot_token)
-        compute_targets(self.va, self.va_targets, eot_token)
-        compute_targets(self.te, self.te_targets, eot_token)
-        print("compute_targets done, took ", time.perf_counter() - t_s)
+        self.val.requires_grad = False
+        print("num training tokens: {}M".format(self.tr.numel() / 1e6))
+        print("num validation tokens: {}M".format(self.val.numel() / 1e6))
         
         # batch samples
         self.batch = torch.zeros((B, T), dtype=torch.int, device=device, requires_grad=False)
-        self.batch_ids = torch.zeros((B, T), dtype=torch.int, device=device, requires_grad=False)
-        self.batch_targets = torch.zeros((B, T), dtype=torch.int, device=device, requires_grad=False)
+        self.batch_ids = torch.arange(0, T, 1, device=device).unsqueeze(0)
+        self.batch_ids = self.batch_ids.repeat(B, 1)
+        assert(self.batch.shape == self.batch_ids.shape)
+        
+    @property
+    def enc(self):
+        # encoder
+        return self.loader.enc
         
     def set_lr_scheduler(self, total_steps):
         # Cosine annealing scheduler
@@ -132,26 +114,20 @@ class LLM_training():
             # sample
             with torch.no_grad():
                 with record_function("sample_batch"):
-                    sample_batch(self.batch, self.batch_ids,
-                                self.tr, self.tr_ids,
-                                self.tr_targets, self.batch_targets)
+                    sample_batch(self.batch, self.tr)
                 
-                # compute attention mask for packed sequence
-                with record_function("att_mask_packed_seq"):
-                    att_mask = att_mask_packed_seq(self.batch, self.eot_token, self.num_heads)
-            
             # forward pass
             with torch.autocast(device_type=str(device), dtype=torch.bfloat16):
                 with record_function("forward"):
                 
-                    logits = self.llm(self.batch, self.batch_ids, att_mask)
+                    logits = self.llm(self.batch, self.batch_ids)
                 
                 with record_function("compute_loss"):
                     
                     # scales the loss by num_batches
-                    loss = compute_loss(logits, self.batch, self.batch_targets,
-                                            self.eot_token, self.loss_fn,
-                                            self.num_batches)
+                    loss = compute_loss(logits, self.batch,
+                                        self.eot_token, self.loss_fn,
+                                        self.num_batches)
                     
             # accumulate gradients
             with record_function("backward"):
@@ -169,19 +145,14 @@ class LLM_training():
     
     def eval(self):
         # sample
-        sample_batch(self.batch, self.batch_ids,
-                     self.va, self.va_ids,
-                     self.va_targets, self.batch_targets)
-        
-        # compute attention mask for packed sequence
-        att_mask = att_mask_packed_seq(self.batch, self.eot_token, self.num_heads)
+        sample_batch(self.batch, self.val)
         
         # forward
-        logits = self.llm(self.batch, self.batch_ids, att_mask)
+        logits = self.llm(self.batch, self.batch_ids)
         
         # scales the loss by num_batches
-        loss = compute_loss(logits, self.batch, self.batch_targets,
-                                self.eot_token, self.loss_fn, 1)
+        loss = compute_loss(logits, self.batch,
+                            self.eot_token, self.loss_fn, 1)
         
         # record
         self.loss_curr[:] = loss.detach()
@@ -210,8 +181,9 @@ class LLM_training():
                 # with_stack=True
             ) as p:
                 for n in range(num_grad_steps):
-                    self.g.replay()
-                    p.step()  
+                    self.train_step()
+                    p.step()
+                    
         elif should_profile:
             return
         
@@ -293,66 +265,40 @@ class LLM_training():
             print("epoch {} done, took {}s, total time: {}".format(self.epoch, t_i, t_total))
             
             self.epoch += 1
-            
-    def process_test_seq(self, seq_in):
-        l = len(seq_in)
-        
-        # prepare tensor inputs
-        x = torch.full((self.T, ), self.eot_token, device=device)
-        x[:l] = torch.as_tensor(seq_in)
-        
-        ids = torch.arange(0, self.T, device=device)
-        ids[l:] = 0
-        
-        x = x.unsqueeze(0)
-        ids = ids.unsqueeze(0)
-        
-        # compute attention mask for packed sequence
-        att_mask = att_mask_packed_seq(x, self.eot_token, self.num_heads)
-        
-        # the attention mask should ignore the eot padding for inference
-        att_mask[:, l, :] = True
-        att_mask[:, :, l] = True
-        att_mask[:, l, l] = False
-        
-        # print(att_mask.shape)
-        # print(att_mask[0, :l*2, :l*2])
-        
-        return x, ids, att_mask
     
-    def infer(self, test_seq, num_tokens, ckpt=str):
+    def infer(self, test_enc, num_tokens, ckpt=str):
         with torch.no_grad():
             # load ckpt
             self.llm.load_state_dict(torch.load(ckpt, weights_only=True))
             print("loaded best checkpoint")
             
-            # process the raw string test sequence
-            test_seq = self.enc.encode(test_seq)
-            print("input test_seq: {}".format(test_seq))
+            # input buffer
+            x_in = torch.full((self.T, ), self.eot_token, device=device)
+            l = len(test_enc)
+            x_in[:l] = test_enc
+            
+            # ids
+            ids = torch.arange(0, self.T, 1, device=device).unsqueeze(0)
+            
+            # TODO: implement sequence truncation
+            assert(l + num_tokens < self.T)
             
             # store next tokens
             out = []
             
             for _ in range(num_tokens):
-                # copy the original seq and append the already predicted tokens
-                seq_in = test_seq.copy()
-                seq_in.extend(out)
-                l = len(seq_in)
-                
-                # process
-                x, ids, att_mask = self.process_test_seq(seq_in)
-                
                 # forward pass
-                y = self.llm.infer(x, ids, att_mask)
+                y = self.llm.infer(x_in.unsqueeze(0), ids)
                 
-                # print the predections
-                y_lst = y[:l].tolist()
-                y_str = self.enc.decode(y_lst)
-                # print("all pred tokens: ", y_lst)
-                print("all pred decoded: ", y_str)
+                # next predected token
+                new_prediction = y[l - 1]
                 
-                # take the next predicted token
-                out.append(y_lst[-1])
+                # append to existing sequence and increment
+                x_in[l] = new_prediction
+                l += 1
+                
+                # store
+                out.append(new_prediction.item())
 
             # print the final predections
             out_str = self.enc.decode(out)
