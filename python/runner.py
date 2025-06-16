@@ -55,7 +55,7 @@ if __name__ == "__main__":
         model.train(num_epochs, num_grad_steps, profile)
     
     if mode == 'infer':
-        ckpt = "runs/LLM_train/best.ckpt"
+        ckpt = "runs/LLM_train_best/best.ckpt"
         
         # test seq - not in training or val set
         test = model.loader.load_ready_data(0.1, begin=False)
